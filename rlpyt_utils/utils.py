@@ -16,6 +16,15 @@ def exponential_reward(vec, b=1, scale=1, axis=-1):
     return scale * np.exp(-0.5 * b * np.linalg.norm(vec, axis=axis) ** 2)
 
 
+def quaternion_distance(q1, q2):
+    """
+        Use 1 - dot(q1, q2)^2 to compute the distance between two quaternions.
+        It equals (1-cos(theta))/2, where theta is angle between given quaternions.
+        https://math.stackexchange.com/questions/90081/quaternion-distance
+    """
+    return 1 - np.square(np.sum(q1 * q2, axis=-1))
+
+
 def load_saved_params(log_dir, run_id, exp_date=None):
     """
     Load parameters from the experiment either specified by the exp date or the latest.
