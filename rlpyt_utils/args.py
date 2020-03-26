@@ -95,4 +95,5 @@ def get_train_run_id(options):
 
 def get_default_context(options, snapshot_mode='last'):
     return logger_context(get_experiment_directory(options), get_train_run_id(options), get_name(options),
-                          snapshot_mode=snapshot_mode, use_summary_writer=True, override_prefix=True)
+                          log_params=vars(options), snapshot_mode=snapshot_mode, use_summary_writer=True,
+                          override_prefix=True)
