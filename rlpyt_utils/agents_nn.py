@@ -117,4 +117,6 @@ class AgentPgContinuous(GaussianPgAgent):
 
     def step(self, observation, prev_action, prev_reward):
         action, agent_info = super().step(observation, prev_action, prev_reward)
+        if self.greedy_eval:
+            action = agent_info.dist_info.mean
         return action, agent_info
