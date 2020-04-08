@@ -1,7 +1,7 @@
 from rlpyt.samplers.base import BaseSampler
 from rlpyt.samplers.buffer import build_samples_buffer
 from rlpyt.utils.logging import logger
-from rlpyt_utils.samplers.batched_episodic_sampler import BatchedCpuResetCollector
+from rlpyt_utils.samplers.batched_collectors import BatchedCpuResetCollector
 from rlpyt.samplers.serial.collectors import SerialEvalCollector
 
 from rlpyt.envs.base import Env
