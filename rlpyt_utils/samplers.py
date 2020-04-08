@@ -113,6 +113,7 @@ class BatchedEpisodicSampler(BaseSampler):
         a = np.asarray(a[0])  # get first batch only
         o = o[0]  # get first batch only
         r = np.asarray(r[0], dtype="float32")  # get first batch only, Must match torch float dtype here.
+        d = False
         self.agent.reset()
         agent_inputs = torchify_buffer(AgentInputs(o, a, r))
         a, agent_info = self.agent.step(*agent_inputs)
