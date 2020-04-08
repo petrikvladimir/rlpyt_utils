@@ -65,10 +65,11 @@ def is_evaluation(options):
     return options.eval or options.greedy_eval
 
 
-def load_initial_model_state(options):
+def load_initial_model_state(options, structure=None):
     """
     Return model state from previous runs.
     If evaluation, return the state for the specified run_id or the latest experiment.
+    Structure specifies the hierarchy in data ['agent_state_dict'] by default, i.e. structure for PPO.
     In training, return the state based on train_start_id:
         if None, return None (i.e. start training from scratch)
         if -1, use the last run_id
@@ -84,7 +85,12 @@ def load_initial_model_state(options):
         return None
     params_path = get_experiment_directory(options).joinpath('run_{}/params.pkl'.format(run_id))
     data = torch.load(params_path)
-    return data['agent_state_dict']
+    if structure is None:
+        return data['agent_state_dict']
+    d = data
+    for s in structure:
+        d = d[s]
+    return d
 
 
 def get_train_run_id(options):

@@ -3,8 +3,7 @@
 # Copyright (c) CTU  - All Rights Reserved
 # Created on: 3/19/20
 #     Author: Vladimir Petrik <vladimir.petrik@cvut.cz>
-
-
+from rlpyt.agents.dqn.dqn_agent import DqnAgent
 from rlpyt.agents.pg.gaussian import *
 from rlpyt.agents.pg.categorical import *
 from rlpyt.models.mlp import MlpModel
@@ -88,7 +87,7 @@ class ModelPgNNContinuous(torch.nn.Module):
             if self.norm_obs_var_clip is not None:
                 obs_var = torch.clamp(obs_var, min=self.norm_obs_var_clip)
             observation = torch.clamp((observation - self.obs_rms.mean) /
-                obs_var.sqrt(), -self.norm_obs_clip, self.norm_obs_clip)
+                                      obs_var.sqrt(), -self.norm_obs_clip, self.norm_obs_clip)
         obs_flat = observation.view(T * B, -1)
         mu = self.mu(obs_flat)
         v = self.v(obs_flat).squeeze(-1)
@@ -119,4 +118,39 @@ class AgentPgContinuous(GaussianPgAgent):
         action, agent_info = super().step(observation, prev_action, prev_reward)
         if self.greedy_eval:
             action = agent_info.dist_info.mean
+        return action, agent_info
+
+
+class ModelDQNNNDiscrete(torch.nn.Module):
+    def __init__(self, observation_shape, action_size, qsize=None, nonlinearity=torch.nn.ReLU):
+        super().__init__()
+        self._obs_ndim = len(observation_shape)
+        input_size = int(np.prod(observation_shape))
+
+        self.q = MlpModel(input_size=input_size,
+                          hidden_sizes=qsize if qsize is not None else [128] * 3,
+                          output_size=action_size,
+                          nonlinearity=nonlinearity, )
+
+    def forward(self, observation, prev_action, prev_reward):
+        lead_dim, T, B, _ = infer_leading_dims(observation, self._obs_ndim)
+        obs_flat = observation.view(T * B, -1)
+        q = self.q(obs_flat)
+        return restore_leading_dims(q, lead_dim, T, B)
+
+
+class AgentDQNDiscrete(DqnAgent):
+
+    def __init__(self, greedy_eval=False, ModelCls=ModelDQNNNDiscrete, **kwargs):
+        super().__init__(ModelCls=ModelCls, **kwargs)
+        self.greedy_eval = greedy_eval
+
+    def make_env_to_model_kwargs(self, env_spaces):
+        return dict(observation_shape=env_spaces.observation.shape,
+                    action_size=env_spaces.action.n, )
+
+    def step(self, observation, prev_action, prev_reward):
+        action, agent_info = super().step(observation, prev_action, prev_reward)
+        if self._mode == "eval" and self.greedy_eval:
+            action = torch.argmax(agent_info.q, dim=-1)
         return action, agent_info
