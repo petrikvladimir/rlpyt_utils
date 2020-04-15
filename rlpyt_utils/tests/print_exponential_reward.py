@@ -34,5 +34,6 @@ for i in range(-2, dd.shape[0]):
         if j < 0 and i >= 0:
             print('**b={:.0e}**'.format(bb[i, 0]), end=' | ' if j != dd.shape[1] - 1 else '')
         elif j >= 0 and i >= 0:
-            print('{:.1e}'.format(v[i, j]), end=' | ' if j != dd.shape[1] - 1 else '')
+            # print('{:.1e}'.format(v[i, j]), end=' | ' if j != dd.shape[1] - 1 else '')
+            print('{}'.format(round(v[i, j], 2)), end=' | ' if j != dd.shape[1] - 1 else '')
     print('')

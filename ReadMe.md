@@ -5,7 +5,7 @@ Some utilities for managing experiments in rlpyt framework, e.g. to automaticall
 # Utils
 ## Exponential reward
 
-Computes unit reward for vector. Parameter _b_ is used to specify lengthscale of the reward according to the table:
+Computes unit reward for vector. Parameter _b_ is used to specify lengthscale of the reward according to the tables:
 
 exp | d=0.01 | d=0.05 | d=0.1 | d=0.5 | d=1.0 | d=5.0 | d=10.0
 --- | --- | --- | --- | --- | --- | --- | ---
@@ -15,3 +15,12 @@ exp | d=0.01 | d=0.05 | d=0.1 | d=0.5 | d=1.0 | d=5.0 | d=10.0
 **b=1e+02** | 1.0e+00 | 8.8e-01 | 6.1e-01 | 3.7e-06 | 1.9e-22 | 0.0e+00 | 0.0e+00
 **b=1e+03** | 9.5e-01 | 2.9e-01 | 6.7e-03 | 5.2e-55 | 7.1e-218 | 0.0e+00 | 0.0e+00
 **b=1e+04** | 6.1e-01 | 3.7e-06 | 1.9e-22 | 0.0e+00 | 0.0e+00 | 0.0e+00 | 0.0e+00
+
+exp | d=0.01 | d=0.05 | d=0.1 | d=0.5 | d=1.0 | d=5.0 | d=10.0
+--- | --- | --- | --- | --- | --- | --- | ---
+**b=1e-02** | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | 0.88 | 0.61
+**b=1e-01** | 1.0 | 1.0 | 1.0 | 0.99 | 0.95 | 0.29 | 0.01
+**b=1e+01** | 1.0 | 0.99 | 0.95 | 0.29 | 0.01 | 0.0 | 0.0
+**b=1e+02** | 1.0 | 0.88 | 0.61 | 0.0 | 0.0 | 0.0 | 0.0
+**b=1e+03** | 0.95 | 0.29 | 0.01 | 0.0 | 0.0 | 0.0 | 0.0
+**b=1e+04** | 0.61 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0
