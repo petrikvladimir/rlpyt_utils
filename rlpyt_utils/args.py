@@ -8,6 +8,9 @@ import argparse
 import sys
 import os
 from pathlib import Path
+
+import psutil
+from rlpyt.algos.pg.ppo import PPO
 from rlpyt.utils.logging.context import logger_context
 
 import torch
@@ -34,6 +37,9 @@ def get_default_rl_parser():
     parser.add_argument('--eval', dest='eval', action='store_true', help='Evaluate the agent.')
     parser.add_argument('--greedy_eval', dest='greedy_eval', action='store_true', help='Evaluate the agent in a greedy\
      mode.')
+
+    """ Affinity parameters """
+    parser.add_argument('-cuda_id', type=int, default=None, help='ID of cuda device used for training. ')
 
     return parser
 
@@ -103,3 +109,31 @@ def get_default_context(options, snapshot_mode='last'):
     return logger_context(get_experiment_directory(options), get_train_run_id(options), get_name(options),
                           log_params=vars(options), snapshot_mode=snapshot_mode, use_summary_writer=True,
                           override_prefix=True)
+
+
+def add_default_ppo_args(parser, lr=3e-4, epochs=25, ratio_clip=0.4, gae=0.95, discount=0.99, entropy=1e-8,
+                         clip_grad_norm=1e8):
+    """ Add default PPO arguments s.t. get_ppo_from_options can be used. """
+    parser.add_argument('-discount', type=float, default=discount)
+    parser.add_argument('-lr', type=float, default=lr)
+    parser.add_argument('-entropy', type=float, default=entropy)
+    parser.add_argument('-epochs', type=int, default=epochs)
+    parser.add_argument('-ratio_clip', type=float, default=ratio_clip)
+    parser.add_argument('-gae', type=float, default=gae)
+    parser.add_argument('-clip_grad_norm', type=float, default=clip_grad_norm)
+    parser.add_argument('--linear_lr', dest='linear_lr', action='store_true')
+
+
+def get_ppo_from_options(options, **kwargs):
+    """ Get ppo algorithm from options. """
+    algo = PPO(entropy_loss_coeff=options.entropy, learning_rate=options.lr, discount=options.discount,
+               gae_lambda=options.gae, ratio_clip=options.ratio_clip, epochs=options.epochs,
+               clip_grad_norm=options.clip_grad_norm, linear_lr_schedule=options.linear_lr, **kwargs)
+    return algo
+
+
+def get_affinity(options):
+    """ Get affinity for all available processors together with cuda id specified by options. """
+    p = psutil.Process()
+    affinity = dict(cuda_idx=options.cuda_id, workers_cpus=p.cpu_affinity())
+    return affinity
