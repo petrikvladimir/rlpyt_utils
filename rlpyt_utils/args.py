@@ -111,7 +111,7 @@ def get_default_context(options, snapshot_mode='last'):
                           override_prefix=True)
 
 
-def add_default_ppo_args(parser, lr=3e-4, epochs=25, ratio_clip=0.4, gae=0.95, discount=0.99, entropy=1e-8,
+def add_default_ppo_args(parser, lr=3e-4, epochs=25, ratio_clip=0.2, gae=0.95, discount=0.99, entropy=1e-8,
                          clip_grad_norm=1e8):
     """ Add default PPO arguments s.t. get_ppo_from_options can be used. """
     parser.add_argument('-discount', type=float, default=discount)
