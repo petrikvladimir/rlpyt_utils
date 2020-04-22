@@ -3,6 +3,51 @@ Some utilities for managing experiments in rlpyt framework, e.g. to automaticall
 
 
 # Utils
+
+## RL default args and logger
+```python
+from rlpyt_utils import args
+from rlpyt_utils.runners.minibatch_rl import MinibatchRlWithLog
+from rlpyt_utils.agents_nn import AgentPgContinuous
+from rlpyt.utils.logging.logger import record_tabular
+import numpy as np
+
+parser = args.get_default_rl_parser()
+args.add_default_ppo_args(parser, ratio_clip=0.2)
+options = parser.parse_args()
+
+def log_diagnostics(itr, algo, agent, sampler):
+    """ Log anything into tensorboard here. """
+    std = np.random(3)
+    for i in range(std.shape[0]):
+        record_tabular('agent/std{}'.format(i), std[i])
+
+
+sampler = ... # build your sampler as usual in rlpyt
+agent = AgentPgContinuous(options.greedy_eval, initial_model_state_dict=args.load_initial_model_state(options),)
+runner = MinibatchRlWithLog(algo=args.get_ppo_from_options(options),
+                            agent=agent, sampler=sampler,
+                            n_steps=int(100000 * options.horizon * options.num_parallel),
+                            log_interval_steps=int(1 * options.horizon * options.num_parallel),
+                            affinity=args.get_affinity(options), log_diagnostics_fun=log_diagnostics, seed=0)
+
+if not args.is_evaluation(options):  # is training
+    with args.get_default_context(options):
+        runner.train()
+else: # is either eval or greedy_eval
+    runner.startup()
+    print('Getting samples')
+    samples_pyt, traj_infos = sampler.obtain_samples(0)
+    print(np.sum(sampler.samples_np.env.reward, axis=0))
+    runner.shutdown()
+``` 
+to run:
+```
+python script.py --help
+python script.py
+python script.py --eval
+```
+
 ## Exponential reward
 
 Computes unit reward for vector. Parameter _b_ is used to specify lengthscale of the reward according to the tables:
