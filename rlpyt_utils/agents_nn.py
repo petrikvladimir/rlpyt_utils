@@ -37,9 +37,9 @@ class ModelPgNNDiscrete(torch.nn.Module):
 
 
 class AgentPgDiscrete(CategoricalPgAgent):
-    def __init__(self, greedy_eval, ModelCls=ModelPgNNDiscrete, **kwargs):
+    def __init__(self, greedy_mode, ModelCls=ModelPgNNDiscrete, **kwargs):
         super().__init__(ModelCls=ModelCls, **kwargs)
-        self.greedy_eval = greedy_eval
+        self.greedy_mode = greedy_mode
 
     def make_env_to_model_kwargs(self, env_spaces):
         return dict(
@@ -49,7 +49,7 @@ class AgentPgDiscrete(CategoricalPgAgent):
 
     def step(self, observation, prev_action, prev_reward):
         action, agent_info = super().step(observation, prev_action, prev_reward)
-        if self._mode == "eval" and self.greedy_eval:
+        if self.greedy_mode:
             action = torch.argmax(agent_info.dist_info.prob, dim=-1)
         return action, agent_info
 
@@ -104,9 +104,9 @@ class ModelPgNNContinuous(torch.nn.Module):
 
 
 class AgentPgContinuous(GaussianPgAgent):
-    def __init__(self, greedy_eval, ModelCls=ModelPgNNContinuous, **kwargs):
+    def __init__(self, greedy_mode, ModelCls=ModelPgNNContinuous, **kwargs):
         super().__init__(ModelCls=ModelCls, **kwargs)
-        self.greedy_eval = greedy_eval
+        self.greedy_mode = greedy_mode
 
     def make_env_to_model_kwargs(self, env_spaces):
         return dict(
@@ -116,7 +116,7 @@ class AgentPgContinuous(GaussianPgAgent):
 
     def step(self, observation, prev_action, prev_reward):
         action, agent_info = super().step(observation, prev_action, prev_reward)
-        if self.greedy_eval:
+        if self.greedy_mode:
             action = agent_info.dist_info.mean
         return action, agent_info
 
@@ -141,9 +141,9 @@ class ModelDQNNNDiscrete(torch.nn.Module):
 
 class AgentDQNDiscrete(DqnAgent):
 
-    def __init__(self, greedy_eval=False, ModelCls=ModelDQNNNDiscrete, **kwargs):
+    def __init__(self, greedy_mode=False, ModelCls=ModelDQNNNDiscrete, **kwargs):
         super().__init__(ModelCls=ModelCls, **kwargs)
-        self.greedy_eval = greedy_eval
+        self.greedy_mode = greedy_mode
 
     def make_env_to_model_kwargs(self, env_spaces):
         return dict(observation_shape=env_spaces.observation.shape,
@@ -151,6 +151,6 @@ class AgentDQNDiscrete(DqnAgent):
 
     def step(self, observation, prev_action, prev_reward):
         action, agent_info = super().step(observation, prev_action, prev_reward)
-        if self._mode == "eval" and self.greedy_eval:
+        if self.greedy_mode:
             action = torch.argmax(agent_info.q, dim=-1)
         return action, agent_info
