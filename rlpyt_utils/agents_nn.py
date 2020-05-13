@@ -58,12 +58,13 @@ class ModelPgNNContinuous(torch.nn.Module):
     def __init__(self, observation_shape, action_size,
                  policy_hidden_sizes=None, policy_hidden_nonlinearity=torch.nn.Tanh,
                  value_hidden_sizes=None, value_hidden_nonlinearity=torch.nn.Tanh,
-                 init_log_std=0., min_log_std=None,
+                 init_log_std=0., min_std=0.,
                  normalize_observation=False,
                  norm_obs_clip=10,
                  norm_obs_var_clip=1e-6,
                  ):
         super().__init__()
+        self.min_std = min_std
         self._obs_ndim = len(observation_shape)
         input_size = int(np.prod(observation_shape))
 
@@ -73,12 +74,16 @@ class ModelPgNNContinuous(torch.nn.Module):
                            nonlinearity=policy_hidden_nonlinearity)
         self.v = MlpModel(input_size=input_size, hidden_sizes=value_hidden_sizes, output_size=1,
                           nonlinearity=value_hidden_nonlinearity, )
-        self.log_std = torch.nn.Parameter(init_log_std * torch.ones(action_size)) + min_log_std
+        self._log_std = torch.nn.Parameter((np.log(np.exp(init_log_std) - self.min_std)) * torch.ones(action_size))
         if normalize_observation:
             self.obs_rms = RunningMeanStdModel(observation_shape)
             self.norm_obs_clip = norm_obs_clip
             self.norm_obs_var_clip = norm_obs_var_clip
         self.normalize_observation = normalize_observation
+
+    @property
+    def log_std(self):
+        return (self._log_std.exp() + self.min_std).log()
 
     def forward(self, observation, prev_action, prev_reward):
         lead_dim, T, B, _ = infer_leading_dims(observation, self._obs_ndim)
