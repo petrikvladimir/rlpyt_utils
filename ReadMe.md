@@ -1,6 +1,10 @@
 # Introduction
 Some utilities for managing experiments in rlpyt framework, e.g. to automatically increase run_id to not overwrite previous run under the same name.
 
+## Installation
+```
+pip install --upgrade git+https://github.com/petrikvladimir/rlpyt_utils.git@master 
+```
 
 # Utils
 
