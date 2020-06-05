@@ -45,34 +45,34 @@ class DMP(torch.nn.Module):
         self.alpha_y = torch.tensor(alpha_y, dtype=dtype)
         self.beta_y = torch.tensor(beta_y, dtype=dtype)
 
-    def psi(self):
+    def psi(self, x):
         """ Get all basis functions for current time x. """
-        return torch.exp(-self.h * (self.x - self.c) ** 2)
+        return torch.exp(-self.h * (x - self.c) ** 2)
 
     def reset(self):
         """ Reset internal time counter to 1. """
         self.x.data.fill_(1.)
 
-    def decay_time(self):
-        """ Update time by one step. """
-        self.x = self.x - self.alpha_x * self.x * self.tau * self.dt
-
-    def force(self, y0):
+    def force(self, y0, x):
         """ Return force for current time and given y0. """
-        psi = self.psi()
-        return torch.sum(self.weight_scale * self.weights * psi, dim=-1) * self.x * (self.g - y0) / torch.sum(psi)
+        psi = self.psi(x)
+        return torch.sum(self.weight_scale * self.weights * psi, dim=-1) * x * (self.g - y0) / torch.sum(psi)
 
-    def forward(self, state, with_time_decay=True):
+    def predict_step(self, x, y0, y, dy):
+        """ In feedforward way, predict next x, y, dy, and ddy. No internal state is changed here. """
+        nx = x - self.alpha_x * x * self.tau * self.dt
+        nddy = self.alpha_y * (self.beta_y * (self.g - y) - dy) + self.force(y0, nx)
+        ndy = dy + self.tau * nddy * self.dt
+        ny = y + self.tau * ndy * self.dt
+        return nx, ny, ndy, nddy
+
+    def forward(self, state):
         """
             Perform one step from the current state and internal time variable.
             State must consists of: [y0, y_t, dy_t], same values are returned for the time t+1.
          """
         y0, y, dy = state[:self.dim], state[self.dim:2 * self.dim], state[2 * self.dim:3 * self.dim]
-        if with_time_decay:
-            self.decay_time()
-        ddy = self.alpha_y * (self.beta_y * (self.g - y) - dy) + self.force(y0)
-        ndy = dy + self.tau * ddy * self.dt
-        ny = y + self.tau * ndy * self.dt
+        self.x, ny, ndy, _nddy = self.predict_step(self.x, y0, y, dy)
         return torch.cat([y0, ny, ndy])
 
     def get_rollout_buffer(self, time=None, dtype=torch.float32):
