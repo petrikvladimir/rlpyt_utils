@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='rlpyt_utils',
-    version='1.2',
+    version='1.3',
     description='Some utilities for rlpyt library.',
     author='Vladimir Petrik',
     author_email='vladimir.petrik@cvut.cz',
