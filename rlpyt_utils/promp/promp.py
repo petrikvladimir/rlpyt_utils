@@ -9,9 +9,11 @@ import torch
 import torch.distributions as tp
 
 
-class ProMP:
+class ProMP(torch.nn.Module):
 
-    def __init__(self, n_dof, num_basis_functions=25, t_start=0., t_stop=1., init_scale_cov_w=1e-2) -> None:
+    def __init__(self, n_dof, num_basis_functions=25, t_start=0., t_stop=1.,
+                 init_scale_cov_w=1e-2, init_scale_mu_w=1.,
+                 cov_eps=1e-7, sigma_y=1e-7, cov_w_is_diagonal=False) -> None:
         super().__init__()
 
         self.N = num_basis_functions  # N - number of basis functions
@@ -21,13 +23,28 @@ class ProMP:
         self.c = torch.linspace(-2 * heq, 1 + 2 * heq, self.N)
         self.h = heq * torch.ones(self.N)
 
-        self.mu_w = torch.nn.Parameter(torch.rand(self.N * self.D))
-        self._cov_w_params = torch.nn.Parameter(init_scale_cov_w * torch.rand((self.N * self.D, self.N * self.D)))
-        self.cov_w = self._cov_w_params.matmul(self._cov_w_params.transpose(0, 1)) + 1e-7
-        self.sigma_y = 1e-7 * torch.eye(2 * self.D).unsqueeze(0)  # 1 x 2D x 2D
-
+        self.cov_eps = cov_eps
+        self.mu_w_params = torch.nn.Parameter(init_scale_mu_w * torch.rand(self.N * self.D))
+        self.cov_w_params = torch.nn.Parameter(init_scale_cov_w * (
+            torch.rand((self.N * self.D) if cov_w_is_diagonal else (self.N * self.D, self.N * self.D))
+        ))
+        self.sigma_y = sigma_y * torch.eye(2 * self.D).unsqueeze(0)  # 1 x 2D x 2D
+        self.conditioning = []
         self.t_start = t_start
         self.t_stop = t_stop
+
+    @property
+    def is_conditioned(self):
+        return len(self.conditioning) != 0
+
+    @property
+    def mu_and_cov_w(self):
+        mu = self.mu_w_params
+        cov_w_params = torch.diag(self.cov_w_params) if len(self.cov_w_params.shape) == 1 else self.cov_w_params
+        cov = cov_w_params.matmul(cov_w_params.transpose(0, 1)) + self.cov_eps * torch.eye(self.N * self.D)
+        for cond in self.conditioning:
+            mu, cov = self._condition_mu_and_cov(mu, cov, **cond)
+        return mu, cov
 
     def phase(self, t, t_start=None, t_end=None):
         """ Compute linear phase s.t. z=0 for t=t_start and z = 1 for t=t_end. Returns z and dz."""
@@ -53,9 +70,10 @@ class ProMP:
         phi = self.get_phi_tensor(t)
         return self._block_diag(*[phi for _ in range(self.D)])
 
-    def cov_y(self, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
+    def mu_and_cov_y(self, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
         """
-        Compute covariance either from time steps or from precomputed phi. Only one of them needs to be specified.
+        Compute mean and covariance either from time steps or from precomputed phi.
+        Only one of them needs to be specified.
         :param t: time steps [T]
         :param phi: phi tensor with shapes [T, N, 2] see get_phi_tensor()
         :returns [T x 2D x 2D] covariance matrices for y; first two correspond to 1. DOF, next to to 2. DOF, etc.
@@ -65,55 +83,55 @@ class ProMP:
         phi = phi if phi is not None else self.get_phi_tensor(t)
         phi = phi.unsqueeze(1).unsqueeze(1)  # [T x 1 x 1 x N x 2]
         phi_t = phi.transpose(-2, -1)  # [T x 1 x 1 x 2 x N]
-        cov_w_blk = self.cov_w.reshape(1, self.D, self.N, self.D, self.N).transpose(-3, -2)  # [1 x D x D x N x N]
-        cov_y_blk = torch.matmul(phi_t, torch.matmul(cov_w_blk, phi))  # T x D x D x 2 x 2
-        cov_y = cov_y_blk.transpose(2, 3).reshape(-1, 2 * self.D, 2 * self.D) + self.sigma_y  # T x 2D x 2D
-        return cov_y
+        mu_w, cov_w = self.mu_and_cov_w
 
-    def mu_y(self, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
-        """
-        Compute mean value either from time steps or from precomputed phi. Only one of them needs to be specified.
-        :param t: time steps [T]
-        :param phi: phi tensor with shapes [T, N, 2] see get_phi_tensor()
-        :returns [T x 2D] mean value for y
-        """
-        assert t is None or phi is None
-        assert not (t is None and phi is None)
-        phi = phi if phi is not None else self.get_phi_tensor(t)
-        phi = phi.unsqueeze(1).unsqueeze(1)  # [T x 1 x 1 x N x 2]
-        mu_w_blk = self.mu_w.reshape((1, 1, self.D, self.N, 1))  # [1 X 1 x D x N x 1]
+        mu_w_blk = mu_w.reshape((1, 1, self.D, self.N, 1))  # [1 X 1 x D x N x 1]
         mu_y_blk = torch.matmul(phi.transpose(-2, -1), mu_w_blk)  # [T x 1 x D x 2 x 1]
         mu_y = mu_y_blk.reshape(-1, 2 * self.D)
-        return mu_y
+
+        cov_w_blk = cov_w.reshape(1, self.D, self.N, self.D, self.N).transpose(-3, -2)  # [1 x D x D x N x N]
+        cov_y_blk = torch.matmul(phi_t, torch.matmul(cov_w_blk, phi))  # T x D x D x 2 x 2
+        cov_y = cov_y_blk.transpose(2, 3).reshape(-1, 2 * self.D, 2 * self.D) + self.sigma_y  # T x 2D x 2D
+
+        return mu_y, cov_y
 
     def w_dist(self):
         """ Returns distribution for weights. Multivariate gaussian N(mu_w, cov_w)."""
-        return tp.MultivariateNormal(self.mu_w, self.cov_w)
+        return tp.MultivariateNormal(*self.mu_and_cov_w)
 
     def y_dist(self, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
         """ Returns distribution for y. Batch of multivariate gaussians N(mu_y, cov_y) for each time or phi."""
-        return tp.MultivariateNormal(self.mu_y(t, phi), self.cov_y(t, phi))
+        return tp.MultivariateNormal(*self.mu_and_cov_y(t, phi))
 
     def condition(self, t: float, y: torch.Tensor = None, cov: torch.Tensor = None):
         """
             Condition ProMP to reach given state y with precision given by cov.
             T must be scalar tensor. y must by vector with 2D elements, and cov is 2Dx2D precision matrix.
         """
+        self.conditioning.append(dict(t=t, y=y, cov=cov))
+
+    def _condition_mu_and_cov(self, mu_w: torch.Tensor, cov_w: torch.Tensor, t: float,
+                              y: torch.Tensor = None, cov: torch.Tensor = None):
+        """
+            Condition ProMP to reach given state y with precision given by cov.
+            T must be scalar tensor. y must by vector with 2D elements, and cov is 2Dx2D precision matrix.
+        """
         psi = self.get_psi_matrix(t=torch.tensor(t))
         psi_t = psi.transpose(-2, -1)
-        mtmp = self.cov_w.mm(psi).mm(torch.inverse(cov + psi_t.mm(self.cov_w).mm(psi)))
-        self.mu_w = self.mu_w + mtmp.mv(y - psi_t.mv(self.mu_w))
-        self.cov_w = self.cov_w - mtmp.mm(psi_t.mm(self.cov_w))
+        mtmp = cov_w.mm(psi).mm(torch.inverse(cov + psi_t.mm(cov_w).mm(psi)))
+        new_mu_w = mu_w + mtmp.mv(y - psi_t.mv(mu_w))
+        new_cov_w = cov_w - mtmp.mm(psi_t.mm(cov_w))
+        return new_mu_w, new_cov_w
 
     def sample_trajectories(self, t, num_samples=10):
         """
             Sample [num_samples] trajectories from a weights distribution.
             Method first sample weights from gaussian distribution and then transform them to DOF space using basis.
-            :returns [T x num_samples x D x 2 (pos/vel) ] tensor.
+            :returns [T x num_samples x 2D ] tensor.
         """
         w = self.w_dist().sample(sample_shape=(num_samples,)).reshape(1, -1, self.D, self.N, 1)  # [1 x B x D x N x 1]
         phi_t = self.get_phi_tensor(t).unsqueeze(1).unsqueeze(1).transpose(-2, -1)
-        y = phi_t.matmul(w).squeeze(-1)
+        y = phi_t.matmul(w).reshape(-1, num_samples, 2 * self.D)
         return y
 
     @staticmethod

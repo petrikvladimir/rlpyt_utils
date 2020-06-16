@@ -25,16 +25,16 @@ class TestProMP(unittest.TestCase):
     def test_cov_y(self):
         promp = ProMP(2)
         t = torch.linspace(0, 1., 10)
-        computed = promp.cov_y(t)
+        computed = promp.mu_and_cov_y(t)[1]
         psi_mat = promp.get_psi_matrix(t)
-        expected = psi_mat.transpose(-2, -1).matmul(promp.cov_w).matmul(psi_mat)
+        expected = psi_mat.transpose(-2, -1).matmul(promp.mu_and_cov_w[1]).matmul(psi_mat) + promp.sigma_y
         self.assertAlmostEqual(torch.sum((expected - computed) ** 2).detach().cpu().numpy(), 0.)
 
     def test_mu_y(self):
         promp = ProMP(2)
         t = torch.linspace(0, 1., 10)
-        expected = promp.get_psi_matrix(t).transpose(-2, -1).matmul(promp.mu_w)
-        computed = promp.mu_y(phi=promp.get_phi_tensor(t))
+        expected = promp.get_psi_matrix(t).transpose(-2, -1).matmul(promp.mu_and_cov_w[0])
+        computed = promp.mu_and_cov_y(phi=promp.get_phi_tensor(t))[0]
         self.assertAlmostEqual(torch.sum((expected - computed) ** 2).detach().cpu().numpy(), 0.)
 
 
