@@ -62,6 +62,7 @@ class ModelPgNNContinuous(torch.nn.Module):
                  normalize_observation=False,
                  norm_obs_clip=10,
                  norm_obs_var_clip=1e-6,
+                 pretrain_mu_file=None,
                  ):
         super().__init__()
         self.min_std = min_std
@@ -72,6 +73,8 @@ class ModelPgNNContinuous(torch.nn.Module):
         value_hidden_sizes = [400, 300] if value_hidden_sizes is None else value_hidden_sizes
         self.mu = MlpModel(input_size=input_size, hidden_sizes=policy_hidden_sizes, output_size=action_size,
                            nonlinearity=policy_hidden_nonlinearity)
+        if pretrain_mu_file is not None:
+            self.mu.load_state_dict(torch.load(pretrain_mu_file))
         self.v = MlpModel(input_size=input_size, hidden_sizes=value_hidden_sizes, output_size=1,
                           nonlinearity=value_hidden_nonlinearity, )
         self._log_std = torch.nn.Parameter((np.log(np.exp(init_log_std) - self.min_std)) * torch.ones(action_size))
