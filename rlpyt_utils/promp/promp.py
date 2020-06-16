@@ -28,9 +28,9 @@ class ProMP(torch.nn.Module):
         self.h = heq * torch.ones(self.N)
 
         self.cov_eps = cov_eps
-        self.mu_w_params = torch.nn.Parameter(init_scale_mu_w * torch.rand(self.N * self.D))
+        self.mu_w_params = torch.nn.Parameter(init_scale_mu_w * torch.randn(self.N * self.D))
         self.cov_w_params = torch.nn.Parameter(init_scale_cov_w * (
-            torch.rand((self.N * self.D) if cov_w_is_diagonal else (self.N * self.D, self.N * self.D))
+            torch.randn((self.N * self.D) if cov_w_is_diagonal else (self.N * self.D, self.N * self.D))
         ))
         self.sigma_y = sigma_y * torch.eye(self.mD).unsqueeze(0)  # 1 x mD x mD
         self.conditioning = []
