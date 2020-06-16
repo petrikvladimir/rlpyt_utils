@@ -13,13 +13,11 @@ from tqdm import trange
 ref_time = torch.linspace(0., 10.)
 ref_y = torch.stack([
     torch.sin(ref_time),
-    torch.cos(ref_time),
     torch.cos(0.3 * ref_time),
-    - 0.3 * torch.sin(0.3 * ref_time),
 ], dim=-1)
 
 promp = ProMP(n_dof=2, num_basis_functions=100, t_start=ref_time[0], t_stop=ref_time[-1],
-              init_scale_cov_w=1e-2, init_scale_mu_w=1e-2, cov_w_is_diagonal=True)
+              init_scale_cov_w=1e-2, init_scale_mu_w=1e-2, cov_w_is_diagonal=True, position_only=True)
 # promp.condition(float(ref_time[0]), ref_y[0], 1e-4 * torch.eye(4))
 
 # promp.cov_w_params.requires_grad = False
@@ -37,16 +35,19 @@ for epoch in bar:
     neg_log_prob.backward()
     optimizer.step()
 
+promp.condition(0., ref_y[0] + torch.tensor([1., 1.]), 1e-4 * torch.eye(2))
+
 fig, ax = plt.subplots(1, 1, squeeze=True)  # type: plt.Figure, plt.Axes
 y = promp.mu_and_cov_y(ref_time)[0].detach().numpy()
 
 y_samples = promp.sample_trajectories(ref_time, num_samples=100)
-ax.plot(y_samples[:, :, 0], y_samples[:, :, 2], '-', alpha=0.15, color='tab:blue')
+ax.plot(y_samples[:, :, 0], y_samples[:, :, 1], '-', alpha=0.15, color='tab:blue')
 
-ax.plot(y[:, 0], y[:, 2], '-', label='Pos ProMP', color='tab:green')
-ax.plot(ref_y[:, 0], ref_y[:, 2], '--', label='Pos Reference', color='tab:orange')
+ax.plot(y[:, 0], y[:, 1], '-', label='Pos ProMP', color='tab:green')
+ax.plot(ref_y[:, 0], ref_y[:, 1], '--', label='Pos Reference', color='tab:orange')
 
 ax.legend()
+ax.axis('equal')
 
 fig, ax = plt.subplots(1, 1, squeeze=True)  # type: plt.Figure, plt.Axes
 ax.plot(ref_time, y, '-', label='ProMP')

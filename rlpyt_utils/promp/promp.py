@@ -13,11 +13,15 @@ class ProMP(torch.nn.Module):
 
     def __init__(self, n_dof, num_basis_functions=25, t_start=0., t_stop=1.,
                  init_scale_cov_w=1e-2, init_scale_mu_w=1.,
-                 cov_eps=1e-7, sigma_y=1e-7, cov_w_is_diagonal=False) -> None:
+                 cov_eps=1e-7, sigma_y=1e-7, cov_w_is_diagonal=False,
+                 position_only=False) -> None:
         super().__init__()
+
+        self.position_only = position_only
 
         self.N = num_basis_functions  # N - number of basis functions
         self.D = n_dof  # D - number of system DOF
+        self.mD = self.D if self.position_only else 2 * self.D  # 2D if pos+vel, 1D if pos only
 
         heq = 1 / self.N
         self.c = torch.linspace(-2 * heq, 1 + 2 * heq, self.N)
@@ -28,7 +32,7 @@ class ProMP(torch.nn.Module):
         self.cov_w_params = torch.nn.Parameter(init_scale_cov_w * (
             torch.rand((self.N * self.D) if cov_w_is_diagonal else (self.N * self.D, self.N * self.D))
         ))
-        self.sigma_y = sigma_y * torch.eye(2 * self.D).unsqueeze(0)  # 1 x 2D x 2D
+        self.sigma_y = sigma_y * torch.eye(self.mD).unsqueeze(0)  # 1 x mD x mD
         self.conditioning = []
         self.t_start = t_start
         self.t_stop = t_stop
@@ -58,15 +62,17 @@ class ProMP(torch.nn.Module):
         return (t - t_start) / (t_end - t_start), torch.ones_like(t) / (t_end - t_start)
 
     def get_phi_tensor(self, t: torch.Tensor):
-        """ For given time stamps, compute phi tensor TxNx2, where N is number of basis, and last dimension represents
-            position and velocity.
+        """ For given time stamps, compute phi tensor TxNxm, where N is number of basis, and last dimension represents
+            position and/or velocity.
         """
         p, dp = self._psi(*self.phase(t), self.c, self.h)
+        if self.position_only:
+            return p.unsqueeze(-1)
         phi = torch.stack((p, dp), dim=-1)
         return phi
 
     def get_psi_matrix(self, t: torch.Tensor):
-        """ Get block diagonal Psi matrix used in the paper. Return T x DN x 2D matrix for all T. """
+        """ Get block diagonal Psi matrix used in the paper. Return T x DN x mD matrix for all T. """
         phi = self.get_phi_tensor(t)
         return self._block_diag(*[phi for _ in range(self.D)])
 
@@ -75,8 +81,8 @@ class ProMP(torch.nn.Module):
         Compute mean and covariance either from time steps or from precomputed phi.
         Only one of them needs to be specified.
         :param t: time steps [T]
-        :param phi: phi tensor with shapes [T, N, 2] see get_phi_tensor()
-        :returns [T x 2D x 2D] covariance matrices for y; first two correspond to 1. DOF, next to to 2. DOF, etc.
+        :param phi: phi tensor with shapes [T, N, m] see get_phi_tensor()
+        :returns [T x mD x mD] covariance matrices for y; first m correspond to 1. DOF, next m to 2. DOF, etc.
         """
         assert t is None or phi is None
         assert not (t is None and phi is None)
@@ -87,11 +93,11 @@ class ProMP(torch.nn.Module):
 
         mu_w_blk = mu_w.reshape((1, 1, self.D, self.N, 1))  # [1 X 1 x D x N x 1]
         mu_y_blk = torch.matmul(phi.transpose(-2, -1), mu_w_blk)  # [T x 1 x D x 2 x 1]
-        mu_y = mu_y_blk.reshape(-1, 2 * self.D)
+        mu_y = mu_y_blk.reshape(-1, self.mD)
 
         cov_w_blk = cov_w.reshape(1, self.D, self.N, self.D, self.N).transpose(-3, -2)  # [1 x D x D x N x N]
-        cov_y_blk = torch.matmul(phi_t, torch.matmul(cov_w_blk, phi))  # T x D x D x 2 x 2
-        cov_y = cov_y_blk.transpose(2, 3).reshape(-1, 2 * self.D, 2 * self.D) + self.sigma_y  # T x 2D x 2D
+        cov_y_blk = torch.matmul(phi_t, torch.matmul(cov_w_blk, phi))  # T x D x D x m x m
+        cov_y = cov_y_blk.transpose(2, 3).reshape(-1, self.mD, self.mD) + self.sigma_y  # T x mD x mD
 
         return mu_y, cov_y
 
@@ -131,7 +137,7 @@ class ProMP(torch.nn.Module):
         """
         w = self.w_dist().sample(sample_shape=(num_samples,)).reshape(1, -1, self.D, self.N, 1)  # [1 x B x D x N x 1]
         phi_t = self.get_phi_tensor(t).unsqueeze(1).unsqueeze(1).transpose(-2, -1)
-        y = phi_t.matmul(w).reshape(-1, num_samples, 2 * self.D)
+        y = phi_t.matmul(w).reshape(-1, num_samples, self.mD)
         return y
 
     @staticmethod
