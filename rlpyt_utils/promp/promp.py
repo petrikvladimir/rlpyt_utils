@@ -21,7 +21,8 @@ class ProMP(torch.nn.Module):
 
         self.N = num_basis_functions  # N - number of basis functions
         self.D = n_dof  # D - number of system DOF
-        self.mD = self.D if self.position_only else 2 * self.D  # 2D if pos+vel, 1D if pos only
+        self.M = 1 if self.position_only else 2
+        self.mD = self.M * self.D
 
         heq = 1 / self.N
         self.c = torch.linspace(-2 * heq, 1 + 2 * heq, self.N)
@@ -39,12 +40,21 @@ class ProMP(torch.nn.Module):
 
     @property
     def is_conditioned(self):
+        """ Return true if promp is conditioned, i.e. conditioning list is not empty. """
         return len(self.conditioning) != 0
 
     @property
+    def is_cov_diagonal(self):
+        return len(self.cov_w_params.shape) == 1
+
+    @property
     def mu_and_cov_w(self):
+        """
+        Computes, possibly conditioned, mean and covariance for the weights.
+        :returns mu [ND], cov [ND x ND]
+        """
         mu = self.mu_w_params
-        cov_w_params = torch.diag(self.cov_w_params) if len(self.cov_w_params.shape) == 1 else self.cov_w_params
+        cov_w_params = torch.diag(self.cov_w_params) if self.is_cov_diagonal else self.cov_w_params
         cov = cov_w_params.matmul(cov_w_params.transpose(0, 1)) + self.cov_eps * torch.eye(self.N * self.D)
         for cond in self.conditioning:
             mu, cov = self._condition_mu_and_cov(mu, cov, **cond)
@@ -62,42 +72,69 @@ class ProMP(torch.nn.Module):
         return (t - t_start) / (t_end - t_start), torch.ones_like(t) / (t_end - t_start)
 
     def get_phi_tensor(self, t: torch.Tensor):
-        """ For given time stamps, compute phi tensor TxNxm, where N is number of basis, and last dimension represents
-            position and/or velocity.
+        """
+        For given time instances [T] computes phi matrices.
+        :returns phi [T x M x N]
         """
         p, dp = self._psi(*self.phase(t), self.c, self.h)
         if self.position_only:
-            return p.unsqueeze(-1)
-        phi = torch.stack((p, dp), dim=-1)
+            return p.unsqueeze(-2)
+        phi = torch.stack((p, dp), dim=-2)
         return phi
 
-    def get_psi_matrix(self, t: torch.Tensor):
-        """ Get block diagonal Psi matrix used in the paper. Return T x DN x mD matrix for all T. """
-        phi = self.get_phi_tensor(t)
+    def get_psi_matrix(self, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
+        """
+        Get block diagonal Psi matrix used in the paper.
+        Return T x DM x DN matrix for all T.
+        """
+        phi = self._get_unsqueezed_phi(t, phi, unsqueeze=False)
         return self._block_diag(*[phi for _ in range(self.D)])
+
+    def _get_unsqueezed_phi(self, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None, unsqueeze=True):
+        """
+        Internal function to compute unsqueezed phi either from time or from precomputed phi.
+        :param t: [T]
+        :param phi: [T x M x N]
+        :return: [T x 1 x 1 x M x N] if unsqueeze True else [T x M x N]
+        """
+        assert t is None or phi is None
+        assert not (t is None and phi is None)
+        phi = phi if phi is not None else self.get_phi_tensor(t)
+        if unsqueeze:
+            return phi.unsqueeze(1).unsqueeze(1)
+        else:
+            return phi
+
+    def y_from_weights(self, w: torch.Tensor, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
+        """
+        Computes y from given weights and either time or phi. Batched computation of Phi * w
+        :param w: [DN]
+        :returns y [T x MD]
+        """
+        phi = self._get_unsqueezed_phi(t, phi)  # [T x 1 x 1 x M x N]
+        w_blk = w.reshape((1, 1, self.D, self.N, 1))  # [1 X 1 x D x N x 1]
+        y_blk = phi.matmul(w_blk)  # [T x 1 x D x M x 1]
+        return y_blk.reshape(-1, self.mD)
 
     def mu_and_cov_y(self, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
         """
         Compute mean and covariance either from time steps or from precomputed phi.
         Only one of them needs to be specified.
         :param t: time steps [T]
-        :param phi: phi tensor with shapes [T, N, m] see get_phi_tensor()
-        :returns [T x mD x mD] covariance matrices for y; first m correspond to 1. DOF, next m to 2. DOF, etc.
+        :param phi: phi tensor with shapes [T x M x N]
+        :returns mu [T x DM], cov [T x DM x DM]
         """
-        assert t is None or phi is None
-        assert not (t is None and phi is None)
-        phi = phi if phi is not None else self.get_phi_tensor(t)
-        phi = phi.unsqueeze(1).unsqueeze(1)  # [T x 1 x 1 x N x 2]
-        phi_t = phi.transpose(-2, -1)  # [T x 1 x 1 x 2 x N]
+        phi = self._get_unsqueezed_phi(t, phi)  # [T x 1 x 1 x M x N]
+        phi_t = phi.transpose(-2, -1)  # [T x 1 x 1 x N x M]
         mu_w, cov_w = self.mu_and_cov_w
 
         mu_w_blk = mu_w.reshape((1, 1, self.D, self.N, 1))  # [1 X 1 x D x N x 1]
-        mu_y_blk = torch.matmul(phi.transpose(-2, -1), mu_w_blk)  # [T x 1 x D x 2 x 1]
+        mu_y_blk = phi.matmul(mu_w_blk)  # [T x 1 x D x M x 1]
         mu_y = mu_y_blk.reshape(-1, self.mD)
 
         cov_w_blk = cov_w.reshape(1, self.D, self.N, self.D, self.N).transpose(-3, -2)  # [1 x D x D x N x N]
-        cov_y_blk = torch.matmul(phi_t, torch.matmul(cov_w_blk, phi))  # T x D x D x m x m
-        cov_y = cov_y_blk.transpose(2, 3).reshape(-1, self.mD, self.mD) + self.sigma_y  # T x mD x mD
+        cov_y_blk = phi.matmul(cov_w_blk).matmul(phi_t)  # T x D x D x m x m
+        cov_y = cov_y_blk.transpose(2, 3).reshape(-1, self.mD, self.mD) + self.sigma_y  # T x DM x DM
 
         return mu_y, cov_y
 
@@ -124,21 +161,76 @@ class ProMP(torch.nn.Module):
         """
         psi = self.get_psi_matrix(t=torch.tensor(t))
         psi_t = psi.transpose(-2, -1)
-        mtmp = cov_w.mm(psi).mm(torch.inverse(cov + psi_t.mm(cov_w).mm(psi)))
-        new_mu_w = mu_w + mtmp.mv(y - psi_t.mv(mu_w))
-        new_cov_w = cov_w - mtmp.mm(psi_t.mm(cov_w))
+        L = cov_w.mm(psi_t).mm(torch.inverse(cov + psi.mm(cov_w).mm(psi_t)))
+        new_mu_w = mu_w + L.mv(y - psi.mv(mu_w))
+        new_cov_w = cov_w - L.mm(psi.mm(cov_w))
         return new_mu_w, new_cov_w
 
-    def sample_trajectories(self, t, num_samples=10):
+    def sample_trajectories(self, num_samples=10, t: Optional[torch.Tensor] = None, phi: Optional[torch.Tensor] = None):
         """
             Sample [num_samples] trajectories from a weights distribution.
             Method first sample weights from gaussian distribution and then transform them to DOF space using basis.
-            :returns [T x num_samples x 2D ] tensor.
+            :returns [T x num_samples x DM ] tensor.
         """
         w = self.w_dist().sample(sample_shape=(num_samples,)).reshape(1, -1, self.D, self.N, 1)  # [1 x B x D x N x 1]
-        phi_t = self.get_phi_tensor(t).unsqueeze(1).unsqueeze(1).transpose(-2, -1)
-        y = phi_t.matmul(w).reshape(-1, num_samples, self.mD)
+        phi = self._get_unsqueezed_phi(t, phi)
+        y = phi.matmul(w).reshape(-1, num_samples, self.mD)
         return y
+
+    # def weights_from_trajectory(self, ref_y: torch.Tensor, t: Optional[torch.Tensor] = None,
+    #                             phi: Optional[torch.Tensor] = None):
+    #     """
+    #     Computes weights from given reference trajectory. Solve least square problem A w = b.
+    #     :param ref_y [T x DM x B] or [T x DM]
+    #     :param t [T]
+    #     :param phi [T x M x N]
+    #     :return: weights [DN x B], i.e. weights for all reference trajectories.
+    #     """
+    #     psi = self.get_psi_matrix(t, phi)  # [T x DM x DN]
+    #     A = psi.reshape(-1, self.D * self.N)  # [TDM x DN]
+    #     b = ref_y.reshape(A.shape[0], -1)  # [TDM x B]
+    #     X, _ = torch.lstsq(b, A)
+    #     return X[:A.shape[1]]
+
+    def weights_from_trajectory(self, ref_y: torch.Tensor, t: Optional[torch.Tensor] = None,
+                                      phi: Optional[torch.Tensor] = None, lambda_eps=1e-3):
+        """
+        Computes weights from given reference trajectory. Solve least square problem A w = b.
+        :param lambda_eps: regularization
+        :param ref_y [T x DM x B] or [T x DM]
+        :param t [T]
+        :param phi [T x M x N]
+        :return: weights [DN x B], i.e. weights for all reference trajectories.
+        """
+        psi = self.get_psi_matrix(t, phi)  # [T x DM x DN]
+        A = psi.reshape(-1, self.D * self.N)  # [TDM x DN]
+        b = ref_y.reshape(A.shape[0], -1)  # [TDM x B]
+        w = torch.inverse(A.transpose(0, 1).mm(A) + lambda_eps * torch.eye(A.shape[1])).mm(A.transpose(0, 1)).mm(b)
+        return w
+
+    def set_params_from_reference_trajectories(self, ref_y: torch.Tensor, t: Optional[torch.Tensor] = None,
+                                               phi: Optional[torch.Tensor] = None, cov_eps=1e-7, fixed_cov=None,
+                                               lambda_eps=1e-3):
+        w = self.weights_from_trajectory(ref_y, t, phi, lambda_eps=lambda_eps)
+        mu_w = w.mean(-1, keepdim=True)
+        self.mu_w_params.data = mu_w.squeeze(-1)
+
+        if fixed_cov is not None:
+            n = self.N * self.D
+            if self.is_cov_diagonal:
+                self.cov_w_params.data = (fixed_cov * torch.ones(n)).sqrt()
+            else:
+                self.cov_w_params.data = (fixed_cov * torch.eye(n)).sqrt()
+            return
+
+        if self.is_cov_diagonal:
+            self.cov_w_params.data = ((w - mu_w) ** 2).mean(-1).sqrt()
+        else:
+            v = w.transpose(0, 1).unsqueeze(-1) - mu_w
+            cov_w = v.matmul(v.transpose(-2, -1)).mean(0)
+            cov_w = (w.shape[-1] * cov_w + cov_eps * torch.eye(self.N * self.D)) / w.shape[-1]
+            cov_w_params = torch.cholesky(cov_w, upper=False)
+            self.cov_w_params.data = cov_w_params
 
     @staticmethod
     def _psi(z: torch.Tensor, zdot: torch.Tensor, c: torch.Tensor, h: torch.Tensor):
@@ -150,6 +242,7 @@ class ProMP(torch.nn.Module):
         b_ndim = len(h.shape)
         k = (z[(...,) + (None,) * b_ndim] - c)
         b = torch.exp(-0.5 * (k ** 2) / h)
+        # b = b / torch.sum(b, -1, keepdim=True)
         dot_b = -k / h * zdot[(...,) + (None,) * b_ndim] * b
         return b, dot_b
 

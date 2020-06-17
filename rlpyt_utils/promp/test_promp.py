@@ -11,56 +11,51 @@ import torch
 
 class TestProMP(unittest.TestCase):
 
-    def test_psi_matrix_dim(self):
-        promp = ProMP(2, num_basis_functions=10)
-        psi_mat = promp.get_psi_matrix(torch.zeros(1))
-        self.assertEqual(psi_mat.shape[0], 1)
-        self.assertEqual(psi_mat.shape[1], 20)
-        self.assertEqual(psi_mat.shape[2], 4)
-        psi_mat = promp.get_psi_matrix(torch.zeros(100))
-        self.assertEqual(psi_mat.shape[0], 100)
-        self.assertEqual(psi_mat.shape[1], 20)
-        self.assertEqual(psi_mat.shape[2], 4)
+    def test_phi_dim(self):
+        mpp = ProMP(2, num_basis_functions=15, position_only=True)
+        mpv = ProMP(2, num_basis_functions=15)
+        self.assertEqual(mpp.get_phi_tensor(torch.zeros(10)).shape, (10, 1, 15))
+        self.assertEqual(mpv.get_phi_tensor(torch.zeros(10)).shape, (10, 2, 15))
 
-    def test_psi_matrix_dim_pos(self):
-        promp = ProMP(2, num_basis_functions=10, position_only=True)
-        psi_mat = promp.get_psi_matrix(torch.zeros(1))
-        self.assertEqual(psi_mat.shape[0], 1)
-        self.assertEqual(psi_mat.shape[1], 20)
-        self.assertEqual(psi_mat.shape[2], 2)
-        psi_mat = promp.get_psi_matrix(torch.zeros(100))
-        self.assertEqual(psi_mat.shape[0], 100)
-        self.assertEqual(psi_mat.shape[1], 20)
-        self.assertEqual(psi_mat.shape[2], 2)
+    def test_psi_dim(self):
+        mpp = ProMP(2, num_basis_functions=15, position_only=True)
+        mpv = ProMP(2, num_basis_functions=15)
+        self.assertEqual(mpp.get_psi_matrix(torch.zeros(10)).shape, (10, 2, 15 * 2))
+        self.assertEqual(mpv.get_psi_matrix(torch.zeros(10)).shape, (10, 4, 15 * 2))
 
-    def test_cov_y(self):
-        promp = ProMP(2)
-        t = torch.linspace(0, 1., 10)
-        computed = promp.mu_and_cov_y(t)[1]
-        psi_mat = promp.get_psi_matrix(t)
-        self.assertEqual(computed.shape[0], 10)
-        self.assertEqual(computed.shape[1], 4)
-        self.assertEqual(computed.shape[1], 4)
-        expected = psi_mat.transpose(-2, -1).matmul(promp.mu_and_cov_w[1]).matmul(psi_mat) + promp.sigma_y
+    def test_y_from_weights(self):
+        mpp = ProMP(2, num_basis_functions=15, position_only=True)
+        mpv = ProMP(2, num_basis_functions=15)
+
+        t = torch.linspace(0, 1)
+        w = torch.linspace(12, 25, 15 * 2)
+        computed = mpp.y_from_weights(w, t)
+        expected = mpp.get_psi_matrix(t).matmul(w)
+        self.assertAlmostEqual(torch.sum((expected - computed) ** 2).detach().cpu().numpy(), 0.)
+        computed = mpv.y_from_weights(w, t)
+        expected = mpv.get_psi_matrix(t).matmul(w)
         self.assertAlmostEqual(torch.sum((expected - computed) ** 2).detach().cpu().numpy(), 0.)
 
-    def test_cov_y_pos(self):
-        promp = ProMP(2, position_only=True)
-        t = torch.linspace(0, 1., 10)
-        computed = promp.mu_and_cov_y(t)[1]
-        psi_mat = promp.get_psi_matrix(t)
-        expected = psi_mat.transpose(-2, -1).matmul(promp.mu_and_cov_w[1]).matmul(psi_mat) + promp.sigma_y
-        self.assertEqual(computed.shape[0], 10)
-        self.assertEqual(computed.shape[1], 2)
-        self.assertEqual(computed.shape[1], 2)
-        self.assertAlmostEqual(torch.sum((expected - computed) ** 2).detach().cpu().numpy(), 0.)
+    def test_mu_cov_y(self):
+        mpp = ProMP(2, num_basis_functions=15, position_only=True)
+        mpv = ProMP(2, num_basis_functions=15)
 
-    def test_mu_y(self):
-        promp = ProMP(2)
-        t = torch.linspace(0, 1., 10)
-        expected = promp.get_psi_matrix(t).transpose(-2, -1).matmul(promp.mu_and_cov_w[0])
-        computed = promp.mu_and_cov_y(phi=promp.get_phi_tensor(t))[0]
-        self.assertAlmostEqual(torch.sum((expected - computed) ** 2).detach().cpu().numpy(), 0.)
+        t = torch.linspace(0, 1)
+        mu, cov = mpp.mu_and_cov_y(t)
+        psi = mpp.get_psi_matrix(t)
+        psi_t = psi.transpose(-2, -1)
+        mu_w, cov_w = mpp.mu_and_cov_w
+        emu, ecov = psi.matmul(mu_w), psi.matmul(cov_w).matmul(psi_t) + mpp.sigma_y
+        self.assertAlmostEqual(torch.sum((emu - mu) ** 2).detach().cpu().numpy(), 0.)
+        self.assertAlmostEqual(torch.sum((ecov - cov) ** 2).detach().cpu().numpy(), 0.)
+
+        mu, cov = mpv.mu_and_cov_y(t)
+        psi = mpv.get_psi_matrix(t)
+        psi_t = psi.transpose(-2, -1)
+        mu_w, cov_w = mpv.mu_and_cov_w
+        emu, ecov = psi.matmul(mu_w), psi.matmul(cov_w).matmul(psi_t) + mpv.sigma_y
+        self.assertAlmostEqual(torch.sum((emu - mu) ** 2).detach().cpu().numpy(), 0.)
+        self.assertAlmostEqual(torch.sum((ecov - cov) ** 2).detach().cpu().numpy(), 0.)
 
 
 if __name__ == '__main__':
