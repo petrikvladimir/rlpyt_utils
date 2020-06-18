@@ -16,7 +16,7 @@ ref_y += torch.randn(2, 5) * 0.1
 ref_y += torch.randn_like(ref_y) * 0.05
 
 promp = ProMP(n_dof=2, num_basis_functions=100, t_start=ref_time[0], t_stop=ref_time[-1],
-              init_scale_cov_w=1e-2, init_scale_mu_w=1e-2, cov_w_is_diagonal=False, position_only=True)
+              init_scale_cov_w=1e-2, init_scale_mu_w=1e-2, cov_w_is_diagonal=True, position_only=True)
 
 promp.set_params_from_reference_trajectories(ref_y, ref_time, lambda_eps=1e-1)
 
@@ -36,6 +36,12 @@ ax.plot(ref_time, y, '-', label='ProMP')
 for i in range(ref_y.shape[-1]):
     ax.set_prop_cycle(None)
     ax.plot(ref_time, ref_y[:, :, i], '--', label='Ref')
+
+ycov = promp.mu_and_cov_y(ref_time)[1].diagonal(dim1=-2, dim2=-1).sqrt().detach().numpy()
+ax.set_prop_cycle(None)
+for i in range(y.shape[1]):
+    ax.fill_between(ref_time, y[:, i] - 3 * ycov[:, i], y[:, i] + 3 * ycov[:, i], alpha=0.5)
+
 ax.legend()
 
 plt.show()
