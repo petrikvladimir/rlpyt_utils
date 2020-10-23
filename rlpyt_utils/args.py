@@ -12,6 +12,7 @@ from pathlib import Path
 import psutil
 from rlpyt.algos.pg.ppo import PPO
 from rlpyt.utils.logging.context import logger_context
+from rlpyt.utils.logging import logger
 
 import torch
 
@@ -105,7 +106,9 @@ def get_train_run_id(options):
         get_last_experiment_id(options, return_minus_one_if_no_experiment=True) + 1
 
 
-def get_default_context(options, snapshot_mode='last'):
+def get_default_context(options, snapshot_mode='last', snapshot_gap=500):
+    if snapshot_mode == 'gap':
+        logger.set_snapshot_gap(snapshot_gap)
     return logger_context(get_experiment_directory(options), get_train_run_id(options), get_name(options),
                           log_params=vars(options), snapshot_mode=snapshot_mode, use_summary_writer=True,
                           override_prefix=True)
